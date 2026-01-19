@@ -1,42 +1,62 @@
 import { Vector3 } from "three/src/Three.Core.js";
 import { Particle } from "../particles/particle";
-import { MU } from "../const";
+import { MU, SAG_RS } from "../const";
 
-type accelFunc = (posn: Vector3, mu: number, eps2?: number) => Vector3;  
+/**
+ * Describes general form acceleration function should take. Passing only the position vector (modifible mu, epsilon)
+ * ensures we aren't passing or calculating too many values at once. important for perf. Tempted to inline 
+ */
+type accelFunc = (posn: Vector3, mu: number, eps2?: number) => Vector3;
+
+/**
+ * Helper func that returns unit vector of given pos'n vector r. 
+ * @param r 
+ * @returns 
+ */
+function UnitVector(r: Vector3) : Vector3{
+    return r.multiplyScalar(1/r.length())
+}
 
 /**
  * Determines the newtonian acceleration of the given particle. 
- * Gm/r^{3/2}
+ * Gm/|r|^{3/2}
  * @param r position vector of the particle 
  * @param mu G*M_{bh} (Gravitational Contant * Mass of black hole)
  * @param eps2 ("small" term to prevent acceleration from blowing up at |r| = 0)
  * @returns Vector3 describing instantaneous acceleration at a single point 
  */
-export function newtonAcceleration(r: Vector3, mu: number, eps2: number = 0.0001) : Vector3 { 
-    const r_mag : number = r.length(); 
-    const accel_constant : number = -mu / (r_mag  + eps2^2) ^ (3/2);
-    const accel : Vector3 = new Vector3(accel_constant*r.x, accel_constant*r.y, accel_constant*r.z); // 
-    return accel; 
+export function newtonAcceleration(r: Vector3, mu: number = MU, eps2: number = 0.0001) : Vector3 { 
+    const radial_accel_mag : number = -mu / (r.length() + eps2)^2
+    const radial_vector : Vector3 = UnitVector(r); 
+    const radial_accel : Vector3 = radial_vector.multiplyScalar(radial_accel_mag);
+    return radial_accel;
 }
-
 /**
- * Approximation of gravitational potential around non-rotating black hole: 
- * https://en.wikipedia.org/wiki/Paczy%C5%84ski%E2%80%93Wiita_potential
- * 
- * Gm/r-rs
- * 
- * @param r radial length from the black hole 
- * @param rs Schwartzchild radius of black hole (2GM/c^2)
- * @param mu G*M_{bh} 
- * @param eps2 small term to prevent potential from exploding
+ * Pacyznski-Witta acceleration derived from Paczynski-Witta potential. 
+ * r-hat is derived from a particle's cartesian coordinates. 
+ *  
+ * @param r a particle's position
+ * @param rs schwartzchild radius
+ * @param mu gravitational constant * central mass 
+ * @param eps clamping constant = 0.001, avoid acceleration explosion
  * @returns 
  */
 
-export function PWPotential(r: Vector3, rs: Vector3, mu: number, eps2: number = 0.0001) : number {
-    return -mu * (1/(r.length() - rs.length() + eps2));
+export function PWAccel(r: Vector3,  mu: number = MU,  eps: number = 0.001) : Vector3 { 
+    const radial_accel_mag : number = mu / (r.length() - SAG_RS + eps)^2 // epsilon term = avoid explosion
+    const radial_vector : Vector3 = UnitVector(r) // grab radial unit vector
+    const radial_accel : Vector3 = radial_vector.multiplyScalar(radial_accel_mag); // grab radial acceleration
+    return radial_accel; 
 }
 
-export function LeapFrogIntegrate(r: Vector3, dt: number, accelFn: accelFunc, particle: Particle) : void { 
+/**
+ * advances the simulation by dt "ticks". 
+ * @param r 
+ * @param dt 
+ * @param accelFn 
+ * @param particle 
+ */
+export function LeapFrogIntegrate(particle: Particle, dt: number, accelFn: accelFunc) : void { 
     // integrate over given dt-interval
 
     const accel : Vector3 = accelFn(particle.position, MU, 0.0001); // allows us to define multiple acceleration models in the future. 
